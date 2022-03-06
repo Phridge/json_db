@@ -7,19 +7,6 @@
 #include <string.h>
 
 
-/* So in this attempt, we are going to model the whole process with an object, 
- * that contains a (big) callback function that handles events such as object begin, integer, error
- * and stuff like that. 
- * The callback function itself can call parsing routines, so its a permanent switch between user function and
- * parser routine, with (so it seems) no extra stack to keep track of stuff.
- * 
- * How are we going to do array/object element count forecasting? #
- * Is it possible (efficiently) in the first place?
- * 
- * Two Things: 
- * 1. It is possible to skip a value and get a summary-struct of the skipped region
- * */
-
 /* bad attempt, lets try the good ol original again! */
 
 enum json_sig {
@@ -53,7 +40,6 @@ value -> NUM | BOOL | NULL | STR | array | object
 *array -> ARRAY value* END
 
 *object -> OBJECT (STR value)* END
-
 */
 struct json_head {
     enum json_ctx ctx;
@@ -76,7 +62,7 @@ struct json_head {
 
 void json_init(struct json_head * head, char * str, enum json_ctx * stack, size_t stack_size);
 void json_next(struct json_head * head);
-void json_get(struct json_head * head, const char * query, ...);
+int json_get(struct json_head * head, const char * query, ...);
 
 
 void json_init(struct json_head * head, char * str, enum json_ctx * stack, size_t stack_size) {
@@ -193,10 +179,9 @@ void json_next(struct json_head * head) {
         } break;
 
         case JSON_ARRAY: {
-            if(c == ']') {
+            if(c == ']') { /* case [] */
                 head->sig = JSON_END;
                 head->end = p + 1;
-                json_pop(head);
                 goto finish;
             } else {
                 json_push(head, JSON_CTX_ARRAY);
@@ -205,10 +190,9 @@ void json_next(struct json_head * head) {
         } break;
 
         case JSON_OBJECT: {
-            if(c == '}') {
+            if(c == '}') { /* case {} */
                 head->sig = JSON_END;
                 head->end = p + 1;
-                json_pop(head);
                 goto finish;
             } else {
                 json_push(head, JSON_CTX_OBJECT_KEY);
@@ -311,17 +295,24 @@ finish:
 
 void json_skip(struct json_head * head) {
     int stackdepth = head->stack.depth;
-    do {
-        if(head->sig == JSON_ERROR) break;
-        else json_next(head);
-    } while(head->stack.depth != stackdepth);
+    for(;;) {
+        switch(head->sig) {
+            case JSON_HALT:
+            case JSON_ERROR: return;
+            case JSON_BOOL:
+            case JSON_NULL:
+            case JSON_STR:
+            case JSON_NUM:
+            case JSON_END: if(head->stack.depth == stackdepth) goto next;
+            default: json_next(head); break;
+        }
+    }
 
-    /* object/array end */
-    if(head->sig == JSON_END)
-        json_next(head);
+next:
+    json_next(head);
 }
 
-int json(struct json_head * head, const char * query, ...) {
+int json_get(struct json_head * head, const char * query, ...) {
     char * p, * endp;
     va_list va;
 

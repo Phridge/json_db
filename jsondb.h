@@ -1,6 +1,8 @@
 #ifndef _JSONDB_H_
 #define _JSONDB_H_
 
+#include <stdlib.h>
+
 
 /* Different JSONDB-Internal Types */
 enum jsondb_types {
@@ -21,14 +23,22 @@ typedef unsigned int jsondb_vword;
 
 struct jsondb_val {
     int refct;
+    unsigned size;
     jsondb_tword * tvec;
-    jsondb_vword * wvec;
+    jsondb_vword * vvec;
 };
 
 typedef struct jsondb_ref {
     struct jsondb_val * val;
-    struct jsondb_next * next;
+    struct jsondb_ref * next;
 } jsondb_ref; 
+
+
+struct jsondb_set {
+    jsondb_ref * head, * tail;
+    size_t size;
+};
+
 
 void jsondb_init(void);
 void jsondb_deinit(void);
