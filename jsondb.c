@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <math.h>
+#include <assert.h>
 
 #include "json.h"
 
@@ -111,7 +113,7 @@ static jsondb_ref * alloc_ref(void) {
 }
 
 
-/* JSONDB VALUE OPERATIONS */
+/* JSONDB VALUE, VALP & REF OPERATIONS */
 
 typedef unsigned short jsondb_size_t;
 
@@ -246,6 +248,53 @@ static jsondb_valp jsondb_valp_measure(jsondb_valp valp) {
     return valp;
 }
 
+static int jsondb_valp_cmp(jsondb_valp p1, jsondb_valp p2) {
+    char type1 = *(char*)(p1), type2 = *(char*)(p2);
+    float fd;
+    size_t p1len, p2len, plen;
+    int cmp;
+    int i;
+
+    if(type1 != type2) {
+        return type2 - type1;
+    }
+
+    switch(type1) {
+        case JSONDB_TYPE_NULL:
+        case JSONDB_TYPE_TRUE:
+        case JSONDB_TYPE_FALSE: return 0;
+        case JSONDB_TYPE_I32: {
+            fd = *(float*)(p2 + 1) - *(float*)(p1 + 1);
+            return fd == 0.f? 0 : fd > 0.f? 1 : -1;
+        }
+        case JSONDB_TYPE_F32: return *(int *)(p2 + 1) - *(int *)(p1 + 1);
+        case JSONDB_TYPE_STR: {
+            p1++, p2++;
+            p1len = *(jsondb_size_t *)(p1);
+            p2len = *(jsondb_size_t *)(p2);
+            plen = p1len > p2len? p2len : p1len;
+            cmp = memcmp(p1 + sizeof(jsondb_size_t), p2 + sizeof(jsondb_size_t), plen);
+            return cmp? cmp : p2len - p1len;
+        }
+        case JSONDB_TYPE_ARRAY: {
+            p1++, p2++;
+            p1len = *(jsondb_size_t *)(p1); p1 += sizeof(jsondb_size_t);
+            p2len = *(jsondb_size_t *)(p2); p2 += sizeof(jsondb_size_t);
+            plen = p1len > p2len ? p2len : p1len;
+            for(i = 0; i < plen; i++) {
+                /* check each of their elements */
+                cmp = jsondb_valp_cmp(p1 + ((jsondb_size_t *)p1)[i], p2 + ((jsondb_size_t *)p2)[i]);
+                if(cmp) return cmp;
+            }
+            /* for the minimal length of both, they're equal - now the length decides */
+            return p2len - p1len;
+        }
+        case JSONDB_TYPE_OBJECT: {
+            /* entries can be mixed up. TODO */
+        }
+    }
+}
+
 /* SET OPERATIONS */
 
 static void jsondb_set_prepend(struct jsondb_set * set, jsondb_ref * ref) {
@@ -259,9 +308,11 @@ static void jsondb_set_prepend(struct jsondb_set * set, jsondb_ref * ref) {
 }
 
 static void jsondb_set_move_into(struct jsondb_set * into, struct jsondb_set * move) {
-    move->tail->next = into->head;
-    into->head = move->head;
-    memset(move, 0, sizeof(*move));
+    if(move->size) {
+        move->tail->next = into->head;
+        into->head = move->head;
+        memset(move, 0, sizeof(*move));
+    }
 }
 
 void jsondb_set_free(struct jsondb_set *set) {
@@ -273,6 +324,60 @@ void jsondb_set_free(struct jsondb_set *set) {
     }
 
     jsondb_set_move_into(&free_refs, set);
+}
+
+struct jsondb_set jsondb_set_get(struct jsondb_set *set, char *path) {
+    /* todo: duplicate code fragment */
+    jsondb_ref *ref = set->head, *new_ref;
+    jsondb_valp root, valp, valp_end;
+    struct jsondb_set result = {0};
+    struct jsondb_val *new_val;
+
+    while (ref) {
+        root = JSONDB_VALP(ref->val);
+        if ((valp = jsondb_valp_get(root, path)) != NULL) {
+            /* omg we found a value, thats amazing */
+            /* alloc and copy over */
+            valp_end = jsondb_valp_measure(valp);
+            new_val = malloc(sizeof(struct jsondb_val) + (valp_end - valp));
+            new_val->refct = 0;
+            new_val->size = (valp_end - valp);
+            memcpy(JSONDB_VALP(new_val), valp, (valp_end - valp));
+
+            /* new reference */
+            new_ref = alloc_ref();
+            jsondb_ref_set(new_ref, new_val);
+
+            /* add reference */
+            jsondb_set_prepend(&result, new_ref);
+        }
+        ref = ref->next;
+    }
+
+    return result;
+}
+
+struct jsondb_set jsondb_set_select_eq(struct jsondb_set *set, char *path, jsondb_ref *cmp) {
+    /* todo: duplicate code fragment */
+    jsondb_ref *ref = set->head, *new_ref;
+    jsondb_valp root, valp;
+    struct jsondb_set result = {0};
+
+    while (ref) {
+        root = JSONDB_VALP(ref->val);
+        if ((valp = jsondb_valp_get(root, path)) != NULL && jsondb_valp_cmp(valp, cmp) == 0) {
+            /* the value at the path and the cmp was equal, great */
+            /* new reference */
+            new_ref = alloc_ref();
+            jsondb_ref_set(new_ref, ref->val);
+
+            /* add reference */
+            jsondb_set_prepend(&result, new_ref);
+        }
+        ref = ref->next;
+    }
+
+    return result;
 }
 
 /* JSON VALUE CREATION */
@@ -436,7 +541,7 @@ static void load_json_to_buf(struct json_head * head, jsondb_valp * p, jsondb_si
 
 /* API OPERATIONS */
 
-void jsondb_insert(char * json, char * json_end) {
+void jsondb_add(char * json, char * json_end) {
     struct json_head head;
     struct jsondb_val * val;
     jsondb_ref * ref;
@@ -463,37 +568,13 @@ void jsondb_insert(char * json, char * json_end) {
     jsondb_set_prepend(&db_refs, ref);
 }
 
-struct jsondb_set jsondb_select(char * path) {
-    jsondb_ref * ref = db_refs.head, * new_ref;
-    jsondb_valp root, valp, valp_end;
-    struct jsondb_set result = {0};
-    struct jsondb_val * new_val;
-
-    while(ref) {
-        root = JSONDB_VALP(ref->val);
-        if((valp = jsondb_valp_get(root, path)) != NULL) {
-            /* omg we found a value, thats amazing */
-            /* alloc and copy over */
-            valp_end = jsondb_valp_measure(valp);
-            new_val = malloc(sizeof(struct jsondb_val) + (valp_end - valp));
-            new_val->refct = 0;
-            new_val->size = (valp_end - valp);
-            memcpy(JSONDB_VALP(new_val), valp, (valp_end - valp));
-
-            /* new reference */
-            new_ref = alloc_ref();
-            jsondb_ref_set(new_ref, new_val);
-
-            /* add reference */
-            jsondb_set_prepend(&result, new_ref);
-        }
-        ref = ref->next;
-    }
-
-    return result;
+struct jsondb_set jsondb_get(char * path) {
+    return jsondb_set_get(&db_refs, path);
 }
 
-
+struct jsondb_set jsondb_select_eq(char *path, jsondb_ref *val) {
+    return jsondb_set_select_eq(&db_refs, path, val);
+}
 
 void jsondb_init(void) {
     alloc_ref_block(1, &free_refs.size, &free_refs.head, &free_refs.tail);

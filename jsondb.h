@@ -6,21 +6,17 @@
 
 /* Different JSONDB-Internal Types */
 enum jsondb_types {
-    JSONDB_TYPE_OBJECT,
-    JSONDB_TYPE_ARRAY,
-    JSONDB_TYPE_STR,
-    JSONDB_TYPE_F32,
-    JSONDB_TYPE_I32,
-    JSONDB_TYPE_TRUE,
-    JSONDB_TYPE_FALSE,
     JSONDB_TYPE_NULL,
+    JSONDB_TYPE_FALSE,
+    JSONDB_TYPE_TRUE,
+    JSONDB_TYPE_I32,
+    JSONDB_TYPE_F32,
+    JSONDB_TYPE_STR,
+    JSONDB_TYPE_ARRAY,
+    JSONDB_TYPE_OBJECT,
 };
 
 typedef void * jsondb_valp;
-
-typedef unsigned char jsondb_tword;
-
-typedef unsigned int jsondb_vword;
 
 
 struct jsondb_val {
@@ -46,8 +42,12 @@ struct jsondb_set {
 void jsondb_init(void);
 void jsondb_deinit(void);
 
-void jsondb_insert(char * json, char * json_end);
-struct jsondb_set jsondb_select(char * path);
+void jsondb_add(char * json, char * json_end);
+struct jsondb_set jsondb_get(char * path);
+struct jsondb_set jsondb_select_eq(char *path, jsondb_ref *val);
+
+struct jsondb_set jsondb_set_get(struct jsondb_set * set, char *path);
+struct jsondb_set jsondb_set_select_eq(struct jsondb_set * set, char *path, jsondb_ref *val);
 
 void jsondb_set_free(struct jsondb_set * set);
 
