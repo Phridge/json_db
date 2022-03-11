@@ -49,6 +49,8 @@ void                jsondb_add              (char * json);
 struct jsondb_set   jsondb_get              (char * path);
 struct jsondb_set   jsondb_select_eq        (char * path, struct jsondb_set * choices);
 struct jsondb_set   jsondb_select_cond      (jsondb_cond_func cond, void * custom_env);
+void                jsondb_diff             (struct jsondb_set * sub);
+void                jsondb_join             (struct jsondb_set * from);
 
 struct jsondb_set   jsondb_set_single       (char * json);
 void                jsondb_set_join         (struct jsondb_set * into, struct jsondb_set * from);
