@@ -9,7 +9,7 @@
 
 
 
-/* REFERENCE BLOCKS */
+#pragma region reference blocks
 
 #define JSONDB_REFBLOCK_CT 1024
 
@@ -112,8 +112,10 @@ static jsondb_ref * alloc_ref(void) {
     return ref;
 }
 
+#pragma endregion
 
-/* JSONDB VALUE, VALP & REF OPERATIONS */
+
+#pragma region val, valp and ref operations
 
 typedef unsigned short jsondb_size_t;
 
@@ -139,6 +141,11 @@ static void jsondb_ref_clear(jsondb_ref * ref) {
         /* TODO: deallocate value */
     }
     ref->val = NULL;
+}
+
+static jsondb_ref * jsondb_ref_last(jsondb_ref * ref) {
+    for(; ref->next; ref = ref->next);
+    return ref;
 }
 
 
@@ -263,11 +270,11 @@ static int jsondb_valp_cmp(jsondb_valp p1, jsondb_valp p2) {
         case JSONDB_TYPE_NULL:
         case JSONDB_TYPE_TRUE:
         case JSONDB_TYPE_FALSE: return 0;
-        case JSONDB_TYPE_I32: {
+        case JSONDB_TYPE_I32: return *(int *)(p2 + 1) - *(int *)(p1 + 1);
+        case JSONDB_TYPE_F32: {
             fd = *(float*)(p2 + 1) - *(float*)(p1 + 1);
             return fd == 0.f? 0 : fd > 0.f? 1 : -1;
         }
-        case JSONDB_TYPE_F32: return *(int *)(p2 + 1) - *(int *)(p1 + 1);
         case JSONDB_TYPE_STR: {
             p1++, p2++;
             p1len = *(jsondb_size_t *)(p1);
@@ -291,96 +298,21 @@ static int jsondb_valp_cmp(jsondb_valp p1, jsondb_valp p2) {
         }
         case JSONDB_TYPE_OBJECT: {
             /* entries can be mixed up. TODO */
+            return 0;
         }
     }
+    assert(0);
 }
 
-/* SET OPERATIONS */
-
-static void jsondb_set_prepend(struct jsondb_set * set, jsondb_ref * ref) {
-    if(!set->head) {
-        set->head = set->tail = ref;
-    } else {
-        ref->next = set->head;
-        set->head = ref;
-    }
-    set->size++;
+static int jsondb_valp_eq(jsondb_valp p1, jsondb_valp p2) {
+    return jsondb_valp_cmp(p1, p2) == 0;
 }
 
-static void jsondb_set_move_into(struct jsondb_set * into, struct jsondb_set * move) {
-    if(move->size) {
-        move->tail->next = into->head;
-        into->head = move->head;
-        memset(move, 0, sizeof(*move));
-    }
-}
+#pragma endregion
 
-void jsondb_set_free(struct jsondb_set *set) {
-    jsondb_ref * p = set->head;
 
-    while(p) {
-        jsondb_val_decref(p->val);
-        p = p->next;
-    }
+#pragma region value creation
 
-    jsondb_set_move_into(&free_refs, set);
-}
-
-struct jsondb_set jsondb_set_get(struct jsondb_set *set, char *path) {
-    /* todo: duplicate code fragment */
-    jsondb_ref *ref = set->head, *new_ref;
-    jsondb_valp root, valp, valp_end;
-    struct jsondb_set result = {0};
-    struct jsondb_val *new_val;
-
-    while (ref) {
-        root = JSONDB_VALP(ref->val);
-        if ((valp = jsondb_valp_get(root, path)) != NULL) {
-            /* omg we found a value, thats amazing */
-            /* alloc and copy over */
-            valp_end = jsondb_valp_measure(valp);
-            new_val = malloc(sizeof(struct jsondb_val) + (valp_end - valp));
-            new_val->refct = 0;
-            new_val->size = (valp_end - valp);
-            memcpy(JSONDB_VALP(new_val), valp, (valp_end - valp));
-
-            /* new reference */
-            new_ref = alloc_ref();
-            jsondb_ref_set(new_ref, new_val);
-
-            /* add reference */
-            jsondb_set_prepend(&result, new_ref);
-        }
-        ref = ref->next;
-    }
-
-    return result;
-}
-
-struct jsondb_set jsondb_set_select_eq(struct jsondb_set *set, char *path, jsondb_ref *cmp) {
-    /* todo: duplicate code fragment */
-    jsondb_ref *ref = set->head, *new_ref;
-    jsondb_valp root, valp;
-    struct jsondb_set result = {0};
-
-    while (ref) {
-        root = JSONDB_VALP(ref->val);
-        if ((valp = jsondb_valp_get(root, path)) != NULL && jsondb_valp_cmp(valp, cmp) == 0) {
-            /* the value at the path and the cmp was equal, great */
-            /* new reference */
-            new_ref = alloc_ref();
-            jsondb_ref_set(new_ref, ref->val);
-
-            /* add reference */
-            jsondb_set_prepend(&result, new_ref);
-        }
-        ref = ref->next;
-    }
-
-    return result;
-}
-
-/* JSON VALUE CREATION */
 
 #define JSONDB_MAX_SIZE USHRT_MAX
 
@@ -538,13 +470,9 @@ static void load_json_to_buf(struct json_head * head, jsondb_valp * p, jsondb_si
     }
 }
 
-
-/* API OPERATIONS */
-
-void jsondb_add(char * json, char * json_end) {
+static struct jsondb_val * jsondb_val_create(char * json) {
     struct json_head head;
     struct jsondb_val * val;
-    jsondb_ref * ref;
     size_t size;
     jsondb_valp p = val_buf;
 
@@ -553,7 +481,7 @@ void jsondb_add(char * json, char * json_end) {
     load_json_to_buf(&head, &p, val_off_buf);
 
     /* allocate value */
-    size = p - (void*)val_buf;
+    size = p - (void *)val_buf;
     val = malloc(sizeof(struct jsondb_val) + size);
 
     /* set value fields */
@@ -561,19 +489,215 @@ void jsondb_add(char * json, char * json_end) {
     val->size = size;
     memcpy(JSONDB_VALP(val), val_buf, size);
 
+    return val;
+}
+
+
+#pragma endregion
+
+
+#pragma region set operations
+
+static void jsondb_set_prepend(struct jsondb_set * set, jsondb_ref * ref) {
+    if(!set->head) {
+        set->head = set->tail = ref;
+    } else {
+        ref->next = set->head;
+        set->head = ref;
+    }
+    set->size++;
+}
+
+static void jsondb_set_append(struct jsondb_set * set, jsondb_ref * ref) {
+    if(!set->head) {
+        set->head = set->tail = ref;
+    } else {
+        set->tail->next = ref;
+        ref->next = set->head;
+    }
+    set->size++;
+}
+
+void jsondb_set_add(struct jsondb_set * set, char * json) {
+    jsondb_ref *ref;
+    struct jsondb_val *val;
+    /* create the value */
+    val = jsondb_val_create(json);
     /* allocate the reference */
     ref = alloc_ref();
     jsondb_ref_set(ref, val);
     /* and put in main db set */
-    jsondb_set_prepend(&db_refs, ref);
+    jsondb_set_prepend(set, ref);
+}
+
+void jsondb_set_join(struct jsondb_set * into, struct jsondb_set * move) {
+    if(move->size) {
+        move->tail->next = into->head;
+        into->head = move->head;
+        memset(move, 0, sizeof(*move));
+    }
+}
+
+static jsondb_ref * merge_lists(jsondb_ref * left, jsondb_ref * right) {
+    jsondb_ref * head = NULL, * tail = NULL, * temp;
+
+    if(!left) return right;
+    if(!right) return left;
+
+    /* select either the left or the right ref as next */
+    while(left && right) {
+        if(jsondb_valp_cmp(JSONDB_VALP(left->val), JSONDB_VALP(right->val)) < 0) {
+            temp = left;
+            left = left->next;
+        } else {
+            temp = right;
+            right = right->next;
+        }
+
+        temp->next = NULL;
+        if(!tail) {
+            head = tail = temp;
+        } else {
+            tail->next = temp;
+            tail = temp;
+        }
+    }
+
+    /* Either left or right may have elements left */
+    /* knit the chains together */
+    /* but at least one element is in head/tail */
+    if(left) {
+        tail->next = left;
+    } else if(right) {
+        tail->next = right;
+    }
+
+    return head;
+}
+
+void jsondb_set_sort(struct jsondb_set * set) {
+    /* credit goes to wikipedia, just copy pasted and rewrote the pseudocode */
+    jsondb_ref * array[32] = {0};
+    jsondb_ref * result, * next;
+    int i;
+
+    if(set->size == 0) return;
+    
+    result = set->head;
+
+    /* merge nodes into array */
+    while(result) {
+        next = result->next;
+        result->next = NULL;
+        for (i = 0; (i < 32) && array[i]; i++) {
+            result = merge_lists(array[i], result);
+            array[i] = NULL;
+        }
+        // do not go past end of array
+        if(i == 32) i--;
+        array[i] = result;
+        result = next;
+    }
+
+    /* merge array into single list */
+    result = NULL;
+    for (i = 0; i < 32; i++)
+        result = merge_lists(array[i], result);
+
+    set->head = result;
+    set->tail = jsondb_ref_last(result);
+    /* size stays the same */
+}
+
+void jsondb_set_free(struct jsondb_set *set) {
+    jsondb_ref * p = set->head;
+
+    while(p) {
+        jsondb_val_decref(p->val);
+        p = p->next;
+    }
+
+    jsondb_set_join(&free_refs, set);
+}
+
+
+struct jsondb_set jsondb_set_get(struct jsondb_set *set, char *path) {
+    /* todo: duplicate code fragment */
+    jsondb_ref *ref, *new_ref;
+    jsondb_valp root, valp, valp_end;
+    struct jsondb_set result = {0};
+    struct jsondb_val *new_val;
+
+    JSONDB_SET_FOREACH(set, ref) {
+        root = JSONDB_VALP(ref->val);
+        if ((valp = jsondb_valp_get(root, path)) != NULL) {
+            /* omg we found a value, thats amazing */
+            /* alloc and copy over */
+            valp_end = jsondb_valp_measure(valp);
+            new_val = malloc(sizeof(struct jsondb_val) + (valp_end - valp));
+            new_val->refct = 0;
+            new_val->size = (valp_end - valp);
+            memcpy(JSONDB_VALP(new_val), valp, (valp_end - valp));
+
+            /* new reference */
+            new_ref = alloc_ref();
+            jsondb_ref_set(new_ref, new_val);
+
+            /* add reference */
+            jsondb_set_prepend(&result, new_ref);
+        }
+    }
+
+    return result;
+}
+
+struct jsondb_set jsondb_set_select_eq(struct jsondb_set * set, char * path, struct jsondb_set * choices) {
+    /* todo: duplicate code fragment */
+    jsondb_ref * set_ref, * new_ref, * choice_ref;
+    jsondb_valp root, set_valp, choice_valp;
+    struct jsondb_set result = {0};
+
+    /* now check each of the references... */
+    JSONDB_SET_FOREACH(set, set_ref) {
+        root = JSONDB_VALP(set_ref->val);
+        if((set_valp = jsondb_valp_get(root, path)) == NULL) {
+            /* has no attribute of the sort of _path_ */
+            continue;
+        }
+
+        /* now try each of the choices */
+        JSONDB_SET_FOREACH(choices, choice_ref) {
+            choice_valp = JSONDB_VALP(choice_ref->val);
+            if (jsondb_valp_cmp(set_valp, choice_valp) == 0) {
+                /* the value at the path and the cmp was equal, great */
+                /* new reference */
+                new_ref = alloc_ref();
+                jsondb_ref_set(new_ref, set_ref->val);
+
+                /* add reference */
+                jsondb_set_prepend(&result, new_ref);
+            }
+        }
+    }
+
+    return result;
+}
+
+#pragma endregion
+
+
+#pragma region main db operations
+
+void jsondb_add(char * json) {
+    jsondb_set_add(&db_refs, json);
 }
 
 struct jsondb_set jsondb_get(char * path) {
     return jsondb_set_get(&db_refs, path);
 }
 
-struct jsondb_set jsondb_select_eq(char *path, jsondb_ref *val) {
-    return jsondb_set_select_eq(&db_refs, path, val);
+struct jsondb_set jsondb_select_eq(char *path, struct jsondb_set * choices) {
+    return jsondb_set_select_eq(&db_refs, path, choices);
 }
 
 void jsondb_init(void) {
@@ -586,3 +710,4 @@ void jsondb_deinit(void) {
     /* delete all references (the blocks) */
 }
 
+#pragma endregion
