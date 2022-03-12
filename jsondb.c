@@ -124,6 +124,7 @@ static void jsondb_val_incref(struct jsondb_val * val) {
 }
 
 static void jsondb_ref_set(jsondb_ref * ref, struct jsondb_val * val) {
+    assert(val);
     ref->val = val;
     val->refct++;
 }
@@ -144,7 +145,8 @@ static void jsondb_ref_clear(jsondb_ref * ref) {
 }
 
 static jsondb_ref * jsondb_ref_last(jsondb_ref * ref) {
-    for(; ref->next; ref = ref->next);
+    if(ref)
+        for(; ref->next; ref = ref->next);
     return ref;
 }
 
@@ -163,19 +165,15 @@ static jsondb_valp jsondb_valp_get(jsondb_valp valp, char * key) {
     /* check the "" case */
     if (*key == '\0') {
         return valp;
-    } else if(*key != '/') {
-        /* no / found, thats bad */
-        /* TODO: replace aborts */
-        abort();
-    } else {
-        /* todo: add ~ stuff support and all the other stuff from RFC 6901 (JSON pointer) */
-        key++;
-        key_end = strchr(key, '/');
-        if(!key_end) {
-            key_end = key + strlen(key);
-        }
-        key_len = key_end - key;
     }
+    assert(*key == '/');
+    /* todo: add ~ stuff support and all the other stuff from RFC 6901 (JSON pointer) */
+    key++;
+    key_end = strchr(key, '/');
+    if(!key_end) {
+        key_end = key + strlen(key);
+    }
+    key_len = key_end - key;
 
     /* check for array */
     if(*((char*)valp) == JSONDB_TYPE_ARRAY) {
@@ -219,7 +217,7 @@ static jsondb_valp jsondb_valp_get(jsondb_valp valp, char * key) {
         return NULL;
     } else {
         /* we cannot subscript any other value */
-        abort();
+        assert(0);
     }
 
 next:
@@ -543,7 +541,7 @@ static jsondb_ref * merge_lists(jsondb_ref * left, jsondb_ref * right) {
 
     if(!left) return right;
     if(!right) return left;
-
+    
     /* select either the left or the right ref as next */
     while(left && right) {
         if(jsondb_valp_cmp(JSONDB_VALP(left->val), JSONDB_VALP(right->val)) < 0) {
