@@ -701,6 +701,22 @@ struct jsondb_set jsondb_set_select_eq(struct jsondb_set * set, char * path, str
     return result;
 }
 
+struct jsondb_set jsondb_set_select_cond(struct jsondb_set *set, jsondb_cond_func cond, void *custom_env) {
+    jsondb_ref * ref;
+    struct jsondb_set result = {0};
+
+    /* now check each of the references... */
+    JSONDB_SET_FOREACH(set, ref) {
+        if(cond(ref, custom_env)) {
+            /* then condition is true, add */
+            jsondb_set_append(&result, jsondb_ref_dup(ref));
+        }
+    }
+
+    /* thats it... */
+    return result;
+}
+
 struct jsondb_set jsondb_set_union(struct jsondb_set *a, struct jsondb_set *b) {
     jsondb_ref * ahead, * bhead;
     struct jsondb_set result = {0};
@@ -843,6 +859,10 @@ struct jsondb_set jsondb_get(char * path) {
 
 struct jsondb_set jsondb_select_eq(char *path, struct jsondb_set * choices) {
     return jsondb_set_select_eq(&db_refs, path, choices);
+}
+
+struct jsondb_set jsondb_select_cond(jsondb_cond_func cond, void *custom_env) {
+    return jsondb_set_select_cond(&db_refs, cond, custom_env);
 }
 
 void jsondb_init(void) {
