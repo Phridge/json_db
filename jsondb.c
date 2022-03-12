@@ -150,6 +150,12 @@ static jsondb_ref * jsondb_ref_last(jsondb_ref * ref) {
     return ref;
 }
 
+static jsondb_ref * jsondb_ref_dup(jsondb_ref * ref) {
+    jsondb_ref * new_ref = alloc_ref();
+    jsondb_ref_set(new_ref, ref->val);
+    return new_ref;
+}
+
 
 static jsondb_valp jsondb_valp_get(jsondb_valp valp, char * key) {
     ssize_t search_index;
@@ -585,7 +591,7 @@ void jsondb_set_sort(struct jsondb_set * set) {
     jsondb_ref * result, * next;
     int i;
 
-    if(set->size == 0) return;
+    if((set->flags & JSONDB_SET_SORTED) || set->size == 0) return;
     
     result = set->head;
 
@@ -610,6 +616,7 @@ void jsondb_set_sort(struct jsondb_set * set) {
 
     set->head = result;
     set->tail = jsondb_ref_last(result);
+    set->flags |= JSONDB_SET_SORTED;
     /* size stays the same */
 }
 
@@ -624,6 +631,13 @@ void jsondb_set_free(struct jsondb_set *set) {
     jsondb_set_join(&free_refs, set);
 }
 
+int jsondb_set_is_empty(struct jsondb_set *set) {
+    return set->size == 0;
+}
+
+void jsondb_set_clear(struct jsondb_set *set) {
+    jsondb_set_free(set);
+}
 
 struct jsondb_set jsondb_set_get(struct jsondb_set *set, char *path) {
     /* todo: duplicate code fragment */
@@ -684,6 +698,133 @@ struct jsondb_set jsondb_set_select_eq(struct jsondb_set * set, char * path, str
         }
     }
 
+    return result;
+}
+
+struct jsondb_set jsondb_set_union(struct jsondb_set *a, struct jsondb_set *b) {
+    jsondb_ref * ahead, * bhead;
+    struct jsondb_set result = {0};
+    int cmp;
+    
+    /* just sort if not sorted yet */
+    jsondb_set_sort(a);
+    jsondb_set_sort(b);
+
+    ahead = a->head;
+    bhead = b->head;
+
+    /* mostly copied and adapted from https://en.cppreference.com/w/cpp/algorithm/set_union */
+    for (; ahead; ) {
+        if (!bhead) {
+            /* Finished range 2, include the rest of range 1: */
+            for(; ahead; ahead = ahead->next) jsondb_set_append(&result, jsondb_ref_dup(ahead));
+            goto finish;
+        }
+
+        /* compare em */
+        cmp = jsondb_valp_cmp(JSONDB_VALP(ahead->val), JSONDB_VALP(bhead->val));
+
+        /* todo to be optimized... */
+        if(cmp > 0) {
+            /* copy ahead over because it is smaller */
+            jsondb_set_append(&result, jsondb_ref_dup(ahead));
+            ahead = ahead->next;
+        } else if (cmp < 0) {
+            /* copy bhead over because it is smaller */
+            jsondb_set_append(&result, jsondb_ref_dup(bhead));
+            bhead = bhead->next;
+        } else {
+            /* copy one over, skip both (because equality) */
+            jsondb_set_append(&result, jsondb_ref_dup(ahead));
+            ahead = ahead->next;
+            bhead = bhead->next;
+        }
+    }
+    /* Finished range 1, include the rest of range 2: */
+    for(; bhead; bhead = bhead->next) jsondb_set_append(&result, jsondb_ref_dup(bhead));
+
+finish:
+    result.flags |= JSONDB_SET_SORTED;
+    return result;
+}
+
+struct jsondb_set jsondb_set_inter(struct jsondb_set *a, struct jsondb_set *b) {
+jsondb_ref * ahead, * bhead;
+    struct jsondb_set result = {0};
+    int cmp;
+    
+    /* just sort if not sorted yet */
+    jsondb_set_sort(a);
+    jsondb_set_sort(b);
+
+    ahead = a->head;
+    bhead = b->head;
+
+    /* mostly copied and adapted from jsondb_set_union */
+    while(ahead && bhead) {
+        /* compare em */
+        cmp = jsondb_valp_cmp(JSONDB_VALP(ahead->val), JSONDB_VALP(bhead->val));
+
+        /* todo to be optimized... */
+        if(cmp > 0) {
+            /* skip a, because smaller */
+            ahead = ahead->next;
+        } else if (cmp < 0) {
+            /* skip b, because bigger */
+            bhead = bhead->next;
+        } else {
+            /* copy one over, skip both (because equality yay) */
+            jsondb_set_append(&result, jsondb_ref_dup(ahead));
+            ahead = ahead->next;
+            bhead = bhead->next;
+        }
+    }
+
+finish:
+    result.flags |= JSONDB_SET_SORTED;
+    return result;
+}
+
+struct jsondb_set jsondb_set_diff(struct jsondb_set *a, struct jsondb_set *b) {
+jsondb_ref * ahead, * bhead;
+    struct jsondb_set result = {0};
+    int cmp;
+    
+    /* just sort if not sorted yet */
+    jsondb_set_sort(a);
+    jsondb_set_sort(b);
+
+    ahead = a->head;
+    bhead = b->head;
+
+    /* mostly copied and adapted jsondb_set_union, just like jsondb_set_inter */
+    for (; ahead; ) {
+        if (!bhead) {
+            // Finished range 2, include the rest of range 1:
+            for(; ahead; ahead = ahead->next) jsondb_set_append(&result, jsondb_ref_dup(ahead));
+            goto finish;
+        }
+
+        /* compare em */
+        cmp = jsondb_valp_cmp(JSONDB_VALP(ahead->val), JSONDB_VALP(bhead->val));
+
+        /* todo to be optimized... */
+        if(cmp > 0) {
+            /* because a is smaller, it is getting included */
+            jsondb_set_append(&result, jsondb_ref_dup(ahead));
+            ahead = ahead->next;
+        } else if (cmp < 0) {
+            /* popping of b and not adding it, because b is the subtractor */
+            bhead = bhead->next;
+        } else {
+            /* They're equal, and thats an exact subtraction situation, so dont add */
+            ahead = ahead->next;
+            bhead = bhead->next;
+        }
+    }
+
+finish:
+    result.flags |= JSONDB_SET_SORTED;
     return result;
 }
 
