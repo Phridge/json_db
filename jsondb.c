@@ -528,6 +528,12 @@ void jsondb_set_add(struct jsondb_set * set, char * json) {
     jsondb_set_prepend(set, ref);
 }
 
+struct jsondb_set jsondb_set_single(char *json) {
+    struct jsondb_set set;
+    jsondb_set_add(&set, json);
+    return set;
+}
+
 void jsondb_set_join(struct jsondb_set * into, struct jsondb_set * move) {
     if(move->size) {
         move->tail->next = into->head;
