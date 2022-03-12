@@ -40,7 +40,7 @@ struct jsondb_set {
 
 #define JSONDB_SET_EMPTY {0}
 
-#define JSONDB_SET_FOREACH(setp, refp) for ((refp) = (setp)->head; (refp); (refp) = (refp)->next)
+#define JSONDB_SET_FOREACH(_setp, _refp) for ((_refp) = (_setp)->head; (_refp); (_refp) = (_refp)->next)
 
 
 
