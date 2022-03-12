@@ -60,6 +60,7 @@ struct jsondb_set   jsondb_set_select_cond  (struct jsondb_set * set, jsondb_con
 struct jsondb_set   jsondb_set_union        (struct jsondb_set * a, struct jsondb_set * b);
 struct jsondb_set   jsondb_set_inter        (struct jsondb_set * a, struct jsondb_set * b);
 struct jsondb_set   jsondb_set_diff         (struct jsondb_set * set, struct jsondb_set * sub);
+void                jsondb_set_sort         (struct jsondb_set * set);
 int                 jsondb_set_is_empty     (struct jsondb_set * set);
 void                jsondb_set_clear        (struct jsondb_set * set);
 
