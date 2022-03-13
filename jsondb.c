@@ -158,7 +158,7 @@ static jsondb_ref * jsondb_ref_dup(jsondb_ref * ref) {
 
 
 static jsondb_valp jsondb_valp_get(jsondb_valp valp, char * key) {
-    ssize_t search_index;
+    int search_index;
     char * key_end;
     size_t key_len;
     jsondb_size_t size;
@@ -603,7 +603,7 @@ void jsondb_set_sort(struct jsondb_set * set) {
             result = merge_lists(array[i], result);
             array[i] = NULL;
         }
-        // do not go past end of array
+        /* do not go past end of array */
         if(i == 32) i--;
         array[i] = result;
         result = next;
@@ -816,7 +816,7 @@ jsondb_ref * ahead, * bhead;
     /* mostly copied and adapted jsondb_set_union, just like jsondb_set_inter */
     for (; ahead; ) {
         if (!bhead) {
-            // Finished range 2, include the rest of range 1:
+            /* Finished range 2, include the rest of range 1: */
             for(; ahead; ahead = ahead->next) jsondb_set_append(&result, jsondb_ref_dup(ahead));
             goto finish;
         }
