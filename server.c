@@ -84,6 +84,7 @@ struct jsondb_server_msg * jsondb_server_poll(int timeout_ms) {
         if(amount_read < 0) {
             perror("client connection read");
             goto error;
+            /* TODO: connection might not end when amount_read == 0, do some stuff with poll */
         } else if(amount_read == 0 /*&& jsondb_server.poll_fd->revents & POLLHUP*/) {
             /* finished reading */
             close(client_fd);
