@@ -1,24 +1,14 @@
 #include <stdio.h>
 #include "jsondb.h"
+#include "server.h"
 
 int main(void) {
-    struct jsondb_set search = {0}, reduced = {0};
+    struct jsondb_server_msg * msg;
+    jsondb_server_init();
 
-    jsondb_init();
+    msg = jsondb_server_poll(10000);
 
-    jsondb_set_add(&search, "10");
-    jsondb_set_add(&search, "103463456");
-    jsondb_set_add(&search, "11");
-    jsondb_set_add(&search, "14");
-    jsondb_set_add(&search, "4");
-    jsondb_set_add(&search, "0");
-    jsondb_set_add(&search, "9");
-    jsondb_set_add(&search, "1");
-
-
-    jsondb_set_sort(&search);
-
-    jsondb_deinit();
+    jsondb_server_deinit();
     return 0;
 }
 
