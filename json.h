@@ -52,7 +52,7 @@ struct json_head {
     enum json_sig sig;
     char * begin, * end;
     char * valid_end;
-    union {
+    union json_valcache {
         int errv;
         int boolv;
         size_t strlen;
@@ -60,12 +60,23 @@ struct json_head {
 
 };
 
-void json_init(struct json_head * head, char * str, enum json_ctx * stack, size_t stack_size);
-void json_next(struct json_head * head);
-int json_get(struct json_head * head, const char * query, ...);
+typedef struct json_mark {
+    enum json_ctx ctx;
+    int depth;
+    enum json_sig sig;
+    char * begin, * end;
+    union json_valcache valcache;
+} json_mark;
 
 
-void json_init(struct json_head * head, char * str, enum json_ctx * stack, size_t stack_size) {
+
+static void json_init(struct json_head * head, char * str, enum json_ctx * stack, size_t stack_size);
+static void json_next(struct json_head * head);
+static int json_get(struct json_head * head, const char * query, ...);
+static void json_restore(struct json_head * head, json_mark * mark);
+
+
+static void json_init(struct json_head * head, char * str, enum json_ctx * stack, size_t stack_size) {
     if(!stack) {
         stack_size = stack_size > 0? stack_size : 16;
         stack = malloc(sizeof(enum json_ctx) * stack_size);
@@ -86,23 +97,23 @@ void json_init(struct json_head * head, char * str, enum json_ctx * stack, size_
     json_next(head);
 }
 
-char * json_bump(char * str) {
+static char * json_bump(char * str) {
     while(isspace(*str)) str++;
     return str;
 }
 
-void json_push(struct json_head * head, enum json_ctx ctx) {
+static void json_push(struct json_head * head, enum json_ctx ctx) {
     *head->stack.ptr++ = head->ctx;
     head->ctx = ctx;
     head->stack.depth++;
 }
 
-void json_pop(struct json_head * head) {
+static void json_pop(struct json_head * head) {
     head->ctx = *--head->stack.ptr;
     head->stack.depth--;
 }
 
-void json_next(struct json_head * head) {
+static void json_next(struct json_head * head) {
 #define BUMP c = *(p = json_bump(p));
 #define SKIP(n) c = *(p += n);
 
@@ -293,7 +304,7 @@ finish:
     return;
 }
 
-void json_skip(struct json_head * head) {
+static void json_skip(struct json_head * head) {
     int stackdepth = head->stack.depth;
     for(;;) {
         switch(head->sig) {
@@ -312,7 +323,7 @@ next:
     json_next(head);
 }
 
-int json_get(struct json_head * head, const char * query, ...) {
+static int json_get(struct json_head * head, const char * query, ...) {
     char * p, * endp;
     va_list va;
 
@@ -323,13 +334,14 @@ int json_get(struct json_head * head, const char * query, ...) {
         size_t cap;
         char * buf;
     } strv;
+    json_mark * mark;
 
     int rc = 0;
 
     va_start(va, query);
 
 
-    while(*query) {
+    while(1) {
         switch(*query) {
 
         case 't': {
@@ -443,6 +455,19 @@ int json_get(struct json_head * head, const char * query, ...) {
             json_skip(head);
         } break;
 
+        case 'm': {
+            /* get mark */
+            mark = va_arg(va, json_mark*);
+            mark->begin = head->begin;
+            mark->end = head->end;
+            mark->ctx = head->ctx;
+            mark->depth = head->stack.depth;
+            mark->sig = head->sig;
+            memcpy(&mark->valcache, &head->valcache, sizeof(union json_valcache));
+        } break;
+
+        case '\0': goto finish;
+
         default: break;
 
         }
@@ -460,19 +485,19 @@ finish:
 
 
 
-void json_len(struct json_head * head) {
+static void json_len(struct json_head * head) {
     if(head->sig != JSON_ARRAY) {
 
     }
 }
 
-
-
-
-
-
-
-
-
+static void json_restore(struct json_head *head, json_mark * mark) {
+    head->begin = mark->begin;
+    head->end = mark->end;
+    head->stack.ptr = head->stack.begin + mark->depth;
+    head->ctx = mark->ctx;
+    head->sig = mark->sig;
+    memcpy(&head->valcache, &mark->valcache, sizeof(union json_valcache));
+}
 
 #endif
