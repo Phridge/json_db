@@ -78,12 +78,13 @@ static void ensure_free_ref_count(size_t count) {
 static struct jsondb_set alloc_refs(size_t count) {
     jsondb_ref * head, * tail;
     struct jsondb_set set;
+    size_t i = count;
 
     ensure_free_ref_count(count);
 
     /* split the current chain into requested chain and rest-chain */
     head = tail = free_refs.head;
-    while(--count) {
+    while(--i) {
         tail = tail->next;
     }
 
@@ -559,8 +560,13 @@ struct jsondb_set jsondb_set_dup(struct jsondb_set *set) {
 
 void jsondb_set_join(struct jsondb_set * into, struct jsondb_set * move) {
     if(move->size) {
-        move->tail->next = into->head;
-        into->head = move->head;
+        if(into->size) {
+            move->tail->next = into->head;
+            into->head = move->head;
+            into->size += move->size;
+        } else {
+            *into = *move; /* lol */
+        }
         memset(move, 0, sizeof(*move));
     }
 }
