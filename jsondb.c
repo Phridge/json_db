@@ -534,10 +534,27 @@ void jsondb_set_add(struct jsondb_set * set, char * json) {
     jsondb_set_prepend(set, ref);
 }
 
+void jsondb_set_add_set(struct jsondb_set *set, struct jsondb_set *add) {
+    struct jsondb_set new_refs;
+    new_refs = jsondb_set_dup(add);
+    jsondb_set_join(set, &new_refs);
+}
+
 struct jsondb_set jsondb_set_single(char *json) {
     struct jsondb_set set;
     jsondb_set_add(&set, json);
     return set;
+}
+
+struct jsondb_set jsondb_set_dup(struct jsondb_set *set) {
+    struct jsondb_set new = alloc_refs(set->size);
+    jsondb_ref * a, * b;
+
+    for(a = set->head, b = new.head; a; a = a->next, b = b->next) {
+        jsondb_ref_set(b, a->val);
+    }
+
+    return new;
 }
 
 void jsondb_set_join(struct jsondb_set * into, struct jsondb_set * move) {
@@ -853,6 +870,10 @@ void jsondb_add(char * json) {
     jsondb_set_add(&db_refs, json);
 }
 
+void jsondb_add_set(struct jsondb_set * add) {
+    jsondb_set_add_set(&db_refs, add);
+}
+
 struct jsondb_set jsondb_get(char * path) {
     return jsondb_set_get(&db_refs, path);
 }
@@ -863,6 +884,10 @@ struct jsondb_set jsondb_select_eq(char *path, struct jsondb_set * choices) {
 
 struct jsondb_set jsondb_select_cond(jsondb_cond_func cond, void *custom_env) {
     return jsondb_set_select_cond(&db_refs, cond, custom_env);
+}
+
+void jsondb_join(struct jsondb_set *from) {
+    jsondb_set_join(&db_refs, from);
 }
 
 void jsondb_init(void) {
