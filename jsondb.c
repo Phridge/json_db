@@ -232,8 +232,9 @@ next:
 }
 
 static jsondb_valp jsondb_valp_measure(jsondb_valp valp) {
-    char type = *(char *)(valp); valp++;
+    char type;
     jsondb_size_t size;
+    type = *(char *)(valp); valp++;
 
     switch(type) {
         case JSONDB_TYPE_TRUE:
@@ -343,7 +344,7 @@ static void load_json_to_buf(struct json_head * head, jsondb_valp * p, jsondb_si
     } while (0)
 #define SHIFT(begin, amount)                          \
     do {                                              \
-        memmove((void*)(begin) + (amount), (void*)(begin), *p - (void*)(begin)); \
+        memmove((char*)(begin) + (amount), (char*)(begin), *p - (char*)(begin)); \
         *p += (amount);                               \
     } while (0)
 
@@ -391,9 +392,9 @@ static void load_json_to_buf(struct json_head * head, jsondb_valp * p, jsondb_si
         case JSON_ARRAY: {
             /* TODO: json array size limits */
             WRITE(char, JSONDB_TYPE_ARRAY);
-            size_mark = *p; *p += sizeof(jsondb_size_t);
+            size_mark = (jsondb_size_t*)*p; *p += sizeof(jsondb_size_t);
             size = 0;
-            off_mark = *p;
+            off_mark = (jsondb_size_t *)*p;
 
             json_next(head);
 
@@ -403,7 +404,7 @@ static void load_json_to_buf(struct json_head * head, jsondb_valp * p, jsondb_si
                 if(sig == JSON_END) {
                     break;
                 } else {
-                    *val_off_p++ = *p - (void *)off_mark;
+                    *val_off_p++ = *p - (jsondb_valp)off_mark;
                     load_json_to_buf(head, p, val_off_p);
                     size++;
                 }
@@ -434,9 +435,9 @@ static void load_json_to_buf(struct json_head * head, jsondb_valp * p, jsondb_si
         case JSON_OBJECT: {
             /* todo: key ordering, max entry count */
             WRITE(char, JSONDB_TYPE_OBJECT);
-            size_mark = *p; *p += sizeof(jsondb_size_t);
+            size_mark = (jsondb_size_t *)*p; *p += sizeof(jsondb_size_t);
             size = 0;
-            off_mark = *p;
+            off_mark = (jsondb_size_t *)*p;
 
             json_next(head);
 
@@ -446,7 +447,7 @@ static void load_json_to_buf(struct json_head * head, jsondb_valp * p, jsondb_si
                 if(sig == JSON_END) {
                     break;
                 } else {
-                    *val_off_p++ = *p - (void*)off_mark;
+                    *val_off_p++ = *p - (jsondb_valp)off_mark;
                     load_json_to_buf(head, p, val_off_p);
                     load_json_to_buf(head, p, val_off_p);
                     size++;
@@ -486,7 +487,7 @@ static struct jsondb_val * jsondb_val_create(char * json) {
     load_json_to_buf(&head, &p, val_off_buf);
 
     /* allocate value */
-    size = p - (void *)val_buf;
+    size = p - (jsondb_valp)val_buf;
     val = malloc(sizeof(struct jsondb_val) + size);
 
     /* set value fields */

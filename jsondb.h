@@ -16,7 +16,7 @@ enum jsondb_types {
     JSONDB_TYPE_OBJECT,
 };
 
-typedef void * jsondb_valp;
+typedef char * jsondb_valp;
 
 
 struct jsondb_val {
