@@ -4,6 +4,7 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <assert.h>
 
 typedef unsigned short cjson_size;
 
@@ -13,6 +14,8 @@ char val_buf[64 * 1024];
 cjson_ptr val_buf_end;
 cjson_size val_off_buf[1024];
 
+static void cjson_sort_obj_keys(cjson_ptr obj);
+
 static void cjson_load_to_buffer(struct json_head * head, cjson_ptr * p, cjson_size * val_off_p) {
     enum json_sig sig;
     int i;
@@ -20,6 +23,7 @@ static void cjson_load_to_buffer(struct json_head * head, cjson_ptr * p, cjson_s
     float fv;
     struct { char * lo, * hi; } span;
     size_t strl;
+    cjson_ptr val_begin;
 
     cjson_size * size_mark, * off_mark;
     size_t size;
@@ -123,6 +127,8 @@ static void cjson_load_to_buffer(struct json_head * head, cjson_ptr * p, cjson_s
 
         case JSON_OBJECT: {
             /* todo: key ordering, max entry count */
+            val_begin = *p;
+
             WRITE(char, CJSON_OBJECT);
             size_mark = (cjson_size *)*p; *p += sizeof(cjson_size);
             size = 0;
@@ -158,6 +164,9 @@ static void cjson_load_to_buffer(struct json_head * head, cjson_ptr * p, cjson_s
                 for ((off_mark += size - 1), val_off_p -= 1; off_mark > size_mark; off_mark--, val_off_p--) {
                     *off_mark = *val_off_p + size * sizeof(cjson_size);
                 }
+
+                /* now sort the keys */
+                cjson_sort_obj_keys(val_begin);
             }
         } break;
 
@@ -165,6 +174,30 @@ static void cjson_load_to_buffer(struct json_head * head, cjson_ptr * p, cjson_s
     }
 }
 
+static void cjson_sort_obj_keys(cjson_ptr obj) {
+    /* holy fuck. this is gnome sort. TODO IMPROOOOOOOOOOOOOVE! */
+    cjson_size size = *(cjson_size*)(obj+1);
+    cjson_size * begin_ptr = (cjson_size*)(obj+1+sizeof(cjson_size)), * end_ptr = begin_ptr + (size-1), * ptr = begin_ptr;
+    cjson_ptr a, b;
+    cjson_size tmp;
+
+    while(ptr < end_ptr) {
+        a = ((cjson_ptr)begin_ptr) + ptr[0];
+        b = ((cjson_ptr)begin_ptr) + ptr[1];
+        if(cjson_cmp(a, b) > 0) {
+            /* swap, because wrong order */
+            tmp = ptr[0];
+            ptr[0] = ptr[1];
+            ptr[1] = tmp;
+            /* do not walk over the lower end */
+            if(ptr > begin_ptr) ptr--;
+            else ptr++; /* swapping at the left end cannot disorder something even further left (because there is nothing), so move forward */
+        } else {
+            /* everything is in order */
+            ptr++;
+        }
+    }
+}
 
 
 cjson_ptr cjson_load(char *json) {
@@ -295,18 +328,20 @@ int cjson_cmp(cjson_ptr p1, cjson_ptr p2) {
     size_t p1len, p2len, plen;
     int cmp;
     int i;
+    cjson_ptr temp1, temp2;
+    size_t key_size;
 
     if(type1 != type2) {
-        return type2 - type1;
+        return type1 - type2;
     }
 
     switch(type1) {
         case CJSON_NULL:
         case CJSON_TRUE:
         case CJSON_FALSE: return 0;
-        case CJSON_I32: return *(int *)(p2 + 1) - *(int *)(p1 + 1);
+        case CJSON_I32: return *(int *)(p1 + 1) - *(int *)(p2 + 1);
         case CJSON_F32: {
-            fd = *(float*)(p2 + 1) - *(float*)(p1 + 1);
+            fd = *(float*)(p1 + 1) - *(float*)(p2 + 1);
             return fd == 0.f? 0 : fd > 0.f? 1 : -1;
         }
         case CJSON_STR: {
@@ -315,7 +350,7 @@ int cjson_cmp(cjson_ptr p1, cjson_ptr p2) {
             p2len = *(cjson_size *)(p2);
             plen = p1len > p2len? p2len : p1len;
             cmp = memcmp(p1 + sizeof(cjson_size), p2 + sizeof(cjson_size), plen);
-            return cmp? cmp : p2len - p1len;
+            return cmp? cmp : p1len - p2len;
         }
         case CJSON_ARRAY: {
             p1++, p2++;
@@ -328,15 +363,34 @@ int cjson_cmp(cjson_ptr p1, cjson_ptr p2) {
                 if(cmp) return cmp;
             }
             /* for the minimal length of both, they're equal - now the length decides */
-            return p2len - p1len;
+            return p1len - p2len;
         }
         case CJSON_OBJECT: {
-            /* entries can be mixed up. TODO */
-            assert(0);
-            return 0;
+            /* Because the keys are sorted, we compare sequentially the entries (key - value) */
+            p1++, p2++;
+            p1len = *(cjson_size *)(p1); p1 += sizeof(cjson_size);
+            p2len = *(cjson_size *)(p2); p2 += sizeof(cjson_size);
+            plen = p1len > p2len ? p2len : p1len;
+            for(i = 0; i < plen; i++) {
+                /* check each of their entries. */
+                /* check the key: */
+                temp1 = p1 + ((cjson_size *)p1)[i];
+                temp2 = p2 + ((cjson_size *)p2)[i];
+                cmp = cjson_cmp(temp1, temp2);
+                if(cmp) return cmp;
+                /* afterward, check the value: TODO: temp1 and temp2 at this point have equal length,  */
+                key_size = cjson_measure(temp1) - temp1;
+                temp1 = temp1 + key_size;
+                temp2 = temp2 + key_size;
+                cmp = cjson_cmp(temp1, temp2);
+                if(cmp) return cmp;
+            }
+            /* for the minimal length of both, they're equal - now the length decides */
+            return p1len - p2len;
         }
     }
     assert(0);
+    return 0;
 }
 
 int cjson_eq(cjson_ptr p1, cjson_ptr p2) {

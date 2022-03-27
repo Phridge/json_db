@@ -266,9 +266,11 @@ static jsondb_ref * merge_lists(jsondb_ref * left, jsondb_ref * right) {
     /* select either the left or the right ref as next */
     while(left && right) {
         if(cjson_cmp(JSONDB_CJSON_PTR(left->val), JSONDB_CJSON_PTR(right->val)) < 0) {
+            /* the left is smaller */
             temp = left;
             left = left->next;
         } else {
+            /* the right is smaller or equal */
             temp = right;
             right = right->next;
         }
@@ -386,7 +388,7 @@ struct jsondb_set jsondb_set_select_eq(struct jsondb_set * set, char * path, str
 
     /* now check each of the references... */
     JSONDB_SET_FOREACH(set, set_ref) {
-        root = JSONDB_CJSON_VAL(set_ref->val);
+        root = JSONDB_CJSON_PTR(set_ref->val);
         if((set_valp = cjson_get(root, path)) == NULL) {
             /* has no attribute of the sort of _path_ */
             continue;
@@ -394,8 +396,8 @@ struct jsondb_set jsondb_set_select_eq(struct jsondb_set * set, char * path, str
 
         /* now try each of the choices */
         JSONDB_SET_FOREACH(choices, choice_ref) {
-            choice_valp = JSONDB_CJSON_VAL(choice_ref->val);
-            if (cjson_cmp(set_valp, choice_valp) == 0) {
+            choice_valp = JSONDB_CJSON_PTR(choice_ref->val);
+            if (cjson_eq(set_valp, choice_valp)) {
                 /* the value at the path and the cmp was equal, great */
                 /* new reference */
                 new_ref = alloc_ref();
@@ -447,14 +449,14 @@ struct jsondb_set jsondb_set_union(struct jsondb_set *a, struct jsondb_set *b) {
         }
 
         /* compare em */
-        cmp = cjson_cmp(JSONDB_CJSON_VAL(ahead->val), JSONDB_CJSON_VAL(bhead->val));
+        cmp = cjson_cmp(JSONDB_CJSON_PTR(ahead->val), JSONDB_CJSON_PTR(bhead->val));
 
         /* todo to be optimized... */
-        if(cmp > 0) {
+        if(cmp < 0) {
             /* copy ahead over because it is smaller */
             jsondb_set_append(&result, jsondb_ref_dup(ahead));
             ahead = ahead->next;
-        } else if (cmp < 0) {
+        } else if (cmp > 0) {
             /* copy bhead over because it is smaller */
             jsondb_set_append(&result, jsondb_ref_dup(bhead));
             bhead = bhead->next;
@@ -488,13 +490,13 @@ struct jsondb_set jsondb_set_inter(struct jsondb_set *a, struct jsondb_set *b) {
     /* mostly copied and adapted from jsondb_set_union */
     while(ahead && bhead) {
         /* compare em */
-        cmp = cjson_cmp(JSONDB_CJSON_VAL(ahead->val), JSONDB_CJSON_VAL(bhead->val));
+        cmp = cjson_cmp(JSONDB_CJSON_PTR(ahead->val), JSONDB_CJSON_PTR(bhead->val));
 
         /* todo to be optimized... */
-        if(cmp > 0) {
+        if(cmp < 0) {
             /* skip a, because smaller */
             ahead = ahead->next;
-        } else if (cmp < 0) {
+        } else if (cmp > 0) {
             /* skip b, because bigger */
             bhead = bhead->next;
         } else {
@@ -531,14 +533,14 @@ struct jsondb_set jsondb_set_diff(struct jsondb_set *a, struct jsondb_set *b) {
         }
 
         /* compare em */
-        cmp = cjson_cmp(JSONDB_CJSON_VAL(ahead->val), JSONDB_CJSON_VAL(bhead->val));
+        cmp = cjson_cmp(JSONDB_CJSON_PTR(ahead->val), JSONDB_CJSON_PTR(bhead->val));
 
         /* todo to be optimized... */
-        if(cmp > 0) {
+        if(cmp < 0) {
             /* because a is smaller, it is getting included */
             jsondb_set_append(&result, jsondb_ref_dup(ahead));
             ahead = ahead->next;
-        } else if (cmp < 0) {
+        } else if (cmp > 0) {
             /* popping of b and not adding it, because b is the subtractor */
             bhead = bhead->next;
         } else {
