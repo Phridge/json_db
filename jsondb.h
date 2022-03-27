@@ -2,6 +2,7 @@
 #define _JSONDB_H_
 
 #include <stdlib.h>
+#include "cjson.h"
 
 
 /* Different JSONDB-Internal Types */
@@ -16,15 +17,13 @@ enum jsondb_types {
     JSONDB_TYPE_OBJECT,
 };
 
-typedef char * jsondb_valp;
-
 
 struct jsondb_val {
     int refct;
     unsigned size;
 };
 
-#define JSONDB_VALP(val) ((jsondb_valp)(val) + sizeof(struct jsondb_val))
+#define JSONDB_CJSON_PTR(val) ((cjson_ptr)(val) + sizeof(struct jsondb_val))
 
 
 typedef struct jsondb_ref {

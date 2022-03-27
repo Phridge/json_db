@@ -6,6 +6,7 @@
 #include <assert.h>
 
 #include "json.h"
+#include "cjson.h"
 
 
 
@@ -157,343 +158,27 @@ static jsondb_ref * jsondb_ref_dup(jsondb_ref * ref) {
     return new_ref;
 }
 
-
-static jsondb_valp jsondb_valp_get(jsondb_valp valp, char * key) {
-    int search_index;
-    char * key_end;
-    size_t key_len;
-    jsondb_size_t size;
-    int i;
-    jsondb_valp entry;
-    size_t entry_key_len;
-    char * entry_key;
-
-
-    /* check the "" case */
-    if (*key == '\0') {
-        return valp;
-    }
-    assert(*key == '/');
-    /* todo: add ~ stuff support and all the other stuff from RFC 6901 (JSON pointer) */
-    key++;
-    key_end = strchr(key, '/');
-    if(!key_end) {
-        key_end = key + strlen(key);
-    }
-    key_len = key_end - key;
-
-    /* check for array */
-    if(*((char*)valp) == JSONDB_TYPE_ARRAY) {
-        valp++;
-        
-        search_index = atoi(key);
-        size = *(jsondb_size_t *)(valp); valp += sizeof(jsondb_size_t);
-        if (search_index >= size) {
-            /* index out of bounds */
-            return NULL;
-        }
-
-        valp = valp + ((jsondb_size_t*)valp)[search_index];
-    }
-    /* check for object */
-    else if (*((char *)valp) == JSONDB_TYPE_OBJECT) {
-        valp++;
-
-        /* now check sequentially each entry for "key" */
-        size = *(jsondb_size_t *)(valp); valp += sizeof(jsondb_size_t);
-        for(i = 0; i < size; i++) {
-            entry = valp + ((jsondb_size_t *)(valp))[i];
-            entry++; /* skip str marker byte */
-            
-            /* sizes must be equal */
-            entry_key_len = *(jsondb_size_t *)(entry); entry += sizeof(jsondb_size_t); 
-            if(entry_key_len != key_len) {
-                continue;
-            }
-
-            /* their content as well */
-            entry_key = entry;
-            if(memcmp(key, entry_key, key_len) == 0) {
-                /* found the key, jump to value */
-                valp = entry_key + key_len;
-                goto next;
-            }
-        }
-
-        /* No key found */
-        return NULL;
-    } else {
-        /* we cannot subscript any other value */
-        assert(0);
-    }
-
-next:
-    return jsondb_valp_get(valp, key_end);
-}
-
-static jsondb_valp jsondb_valp_measure(jsondb_valp valp) {
-    char type;
-    jsondb_size_t size;
-    type = *(char *)(valp); valp++;
-
-    switch(type) {
-        case JSONDB_TYPE_TRUE:
-        case JSONDB_TYPE_FALSE:
-        case JSONDB_TYPE_NULL: break;
-        case JSONDB_TYPE_F32:
-        case JSONDB_TYPE_I32: {
-            valp += 4;
-        } break;
-        case JSONDB_TYPE_STR: {
-            valp += *(jsondb_size_t*)(valp) + sizeof(jsondb_size_t);
-        } break;
-        case JSONDB_TYPE_ARRAY: {
-            size = *(jsondb_size_t*)(valp); valp += sizeof(jsondb_size_t);
-            valp = size == 0? valp : jsondb_valp_measure(valp + ((jsondb_size_t*)(valp))[size-1]);
-        } break;
-        case JSONDB_TYPE_OBJECT: {
-            size = *(jsondb_size_t *)(valp); valp += sizeof(jsondb_size_t);
-            /* crazy shit's happenin here */
-            valp = size == 0? valp : jsondb_valp_measure(jsondb_valp_measure(valp + ((jsondb_size_t *)(valp))[size - 1]));
-        } break;
-    }
-
-    return valp;
-}
-
-static int jsondb_valp_cmp(jsondb_valp p1, jsondb_valp p2) {
-    char type1 = *(char*)(p1), type2 = *(char*)(p2);
-    float fd;
-    size_t p1len, p2len, plen;
-    int cmp;
-    int i;
-
-    if(type1 != type2) {
-        return type2 - type1;
-    }
-
-    switch(type1) {
-        case JSONDB_TYPE_NULL:
-        case JSONDB_TYPE_TRUE:
-        case JSONDB_TYPE_FALSE: return 0;
-        case JSONDB_TYPE_I32: return *(int *)(p2 + 1) - *(int *)(p1 + 1);
-        case JSONDB_TYPE_F32: {
-            fd = *(float*)(p2 + 1) - *(float*)(p1 + 1);
-            return fd == 0.f? 0 : fd > 0.f? 1 : -1;
-        }
-        case JSONDB_TYPE_STR: {
-            p1++, p2++;
-            p1len = *(jsondb_size_t *)(p1);
-            p2len = *(jsondb_size_t *)(p2);
-            plen = p1len > p2len? p2len : p1len;
-            cmp = memcmp(p1 + sizeof(jsondb_size_t), p2 + sizeof(jsondb_size_t), plen);
-            return cmp? cmp : p2len - p1len;
-        }
-        case JSONDB_TYPE_ARRAY: {
-            p1++, p2++;
-            p1len = *(jsondb_size_t *)(p1); p1 += sizeof(jsondb_size_t);
-            p2len = *(jsondb_size_t *)(p2); p2 += sizeof(jsondb_size_t);
-            plen = p1len > p2len ? p2len : p1len;
-            for(i = 0; i < plen; i++) {
-                /* check each of their elements */
-                cmp = jsondb_valp_cmp(p1 + ((jsondb_size_t *)p1)[i], p2 + ((jsondb_size_t *)p2)[i]);
-                if(cmp) return cmp;
-            }
-            /* for the minimal length of both, they're equal - now the length decides */
-            return p2len - p1len;
-        }
-        case JSONDB_TYPE_OBJECT: {
-            /* entries can be mixed up. TODO */
-            return 0;
-        }
-    }
-    assert(0);
-}
-
-static int jsondb_valp_eq(jsondb_valp p1, jsondb_valp p2) {
-    return jsondb_valp_cmp(p1, p2) == 0;
-}
-
 #pragma endregion
 
 
 #pragma region value creation
 
-
-#define JSONDB_MAX_SIZE USHRT_MAX
-
-char val_buf[64 * 1024];
-jsondb_size_t val_off_buf[1024];
-
-static void load_json_to_buf(struct json_head * head, jsondb_valp * p, jsondb_size_t * val_off_p) {
-    enum json_sig sig;
-    int i;
-    int iv;
-    float fv;
-    struct { char * lo, * hi; } span;
-    size_t strl;
-
-    jsondb_size_t * size_mark, * off_mark;
-    size_t size;
-    jsondb_size_t * offs_mark;
-
-#define WRITE(type, value)       \
-    do {                         \
-        *(type *)(*p) = (value); \
-        *p += sizeof(type);      \
-    } while (0)
-#define SHIFT(begin, amount)                          \
-    do {                                              \
-        memmove((char*)(begin) + (amount), (char*)(begin), *p - (char*)(begin)); \
-        *p += (amount);                               \
-    } while (0)
-
-    json_get(head, "t", &sig);
-
-    switch(sig) {
-        case JSON_NULL: {
-            WRITE(char, JSONDB_TYPE_NULL);
-            json_next(head);
-        } break;
-
-        case JSON_BOOL: {
-            json_get(head, "i.", &iv);
-            WRITE(char, iv ? JSONDB_TYPE_TRUE : JSONDB_TYPE_FALSE);
-        } break;
-
-        case JSON_NUM: {
-            json_get(head, "[]", &span.lo, &span.hi);
-            if(memchr(span.lo, '.', span.hi - span.lo) != NULL) {
-                /* float because decimal point */
-                json_get(head, "f.", &fv);
-                WRITE(char, JSONDB_TYPE_F32);
-                WRITE(float, fv);
-            } else {
-                /* int because no decimal point */
-                json_get(head, "i.", &iv);
-                WRITE(char, JSONDB_TYPE_I32);
-                WRITE(int, iv);
-            }
-        } break;
-
-        case JSON_STR: {
-            json_get(head, "#", &strl);
-
-            if(strl > JSONDB_MAX_SIZE) {
-                abort();
-            }
-
-            WRITE(char, JSONDB_TYPE_STR);
-            WRITE(jsondb_size_t, strl);
-            json_get(head, "s.", *p, (size_t)JSONDB_MAX_SIZE); /* TODO max string length */
-            *p += strl;
-        } break;
-
-        case JSON_ARRAY: {
-            /* TODO: json array size limits */
-            WRITE(char, JSONDB_TYPE_ARRAY);
-            size_mark = (jsondb_size_t*)*p; *p += sizeof(jsondb_size_t);
-            size = 0;
-            off_mark = (jsondb_size_t *)*p;
-
-            json_next(head);
-
-            while(1) {
-                json_get(head, "t", &sig);
-
-                if(sig == JSON_END) {
-                    break;
-                } else {
-                    *val_off_p++ = *p - (jsondb_valp)off_mark;
-                    load_json_to_buf(head, p, val_off_p);
-                    size++;
-                }
-            }
-
-            json_next(head);
-
-
-            if (size > JSONDB_MAX_SIZE) {
-                abort();
-            }
-            *size_mark = size;
-
-            if(size > 0) {
-                /* push everything right */
-                SHIFT(off_mark, size * sizeof(jsondb_size_t));
-
-                /* copy over all the jump offsets */
-                for ((off_mark += size - 1), val_off_p -= 1; off_mark > size_mark; off_mark--, val_off_p--) {
-                    /* the recorded offset plus the space needed for the refs. */
-                    /* so the offset os relative to _after_ the size */
-                    *off_mark = *val_off_p + size * sizeof(jsondb_size_t);
-                }
-            }
-
-        } break;
-
-        case JSON_OBJECT: {
-            /* todo: key ordering, max entry count */
-            WRITE(char, JSONDB_TYPE_OBJECT);
-            size_mark = (jsondb_size_t *)*p; *p += sizeof(jsondb_size_t);
-            size = 0;
-            off_mark = (jsondb_size_t *)*p;
-
-            json_next(head);
-
-            while(1) {
-                json_get(head, "t", &sig);
-
-                if(sig == JSON_END) {
-                    break;
-                } else {
-                    *val_off_p++ = *p - (jsondb_valp)off_mark;
-                    load_json_to_buf(head, p, val_off_p);
-                    load_json_to_buf(head, p, val_off_p);
-                    size++;
-                }
-            }
-
-            json_next(head);
-
-
-            if (size > JSONDB_MAX_SIZE) {
-                abort();
-            }
-            *size_mark = size;
-
-            if(size > 0) {
-                /* push everything right */
-                SHIFT(off_mark, size * sizeof(jsondb_size_t));
-                /* copy over all the jump offsets */
-                for ((off_mark += size - 1), val_off_p -= 1; off_mark > size_mark; off_mark--, val_off_p--) {
-                    *off_mark = *val_off_p + size * sizeof(jsondb_size_t);
-                }
-            }
-        } break;
-
-        default: break;
-    }
-}
-
 static struct jsondb_val * jsondb_val_create(char * json) {
-    struct json_head head;
     struct jsondb_val * val;
     size_t size;
-    jsondb_valp p = val_buf;
+    cjson_ptr p;
 
-    /* load json value to buffer */
-    json_init(&head, json, NULL, 0);
-    load_json_to_buf(&head, &p, val_off_buf);
+    /* load stuff */
+    p = cjson_load(json);
+    size = cjson_measure(p) - p;
 
     /* allocate value */
-    size = p - (jsondb_valp)val_buf;
     val = malloc(sizeof(struct jsondb_val) + size);
 
     /* set value fields */
     val->refct = 0;
     val->size = size;
-    memcpy(JSONDB_VALP(val), val_buf, size);
+    memcpy(JSONDB_CJSON_PTR(val), p, size);
 
     return val;
 }
@@ -580,7 +265,7 @@ static jsondb_ref * merge_lists(jsondb_ref * left, jsondb_ref * right) {
     
     /* select either the left or the right ref as next */
     while(left && right) {
-        if(jsondb_valp_cmp(JSONDB_VALP(left->val), JSONDB_VALP(right->val)) < 0) {
+        if(cjson_cmp(JSONDB_CJSON_PTR(left->val), JSONDB_CJSON_PTR(right->val)) < 0) {
             temp = left;
             left = left->next;
         } else {
@@ -666,20 +351,20 @@ void jsondb_set_clear(struct jsondb_set *set) {
 struct jsondb_set jsondb_set_get(struct jsondb_set *set, char *path) {
     /* todo: duplicate code fragment */
     jsondb_ref *ref, *new_ref;
-    jsondb_valp root, valp, valp_end;
+    cjson_ptr root, valp, valp_end;
     struct jsondb_set result = {0};
     struct jsondb_val *new_val;
 
     JSONDB_SET_FOREACH(set, ref) {
-        root = JSONDB_VALP(ref->val);
-        if ((valp = jsondb_valp_get(root, path)) != NULL) {
+        root = JSONDB_CJSON_PTR(ref->val);
+        if ((valp = cjson_get(root, path)) != NULL) {
             /* omg we found a value, thats amazing */
             /* alloc and copy over */
-            valp_end = jsondb_valp_measure(valp);
+            valp_end = cjson_measure(valp);
             new_val = malloc(sizeof(struct jsondb_val) + (valp_end - valp));
             new_val->refct = 0;
             new_val->size = (valp_end - valp);
-            memcpy(JSONDB_VALP(new_val), valp, (valp_end - valp));
+            memcpy(JSONDB_CJSON_PTR(new_val), valp, (valp_end - valp));
 
             /* new reference */
             new_ref = alloc_ref();
@@ -696,21 +381,21 @@ struct jsondb_set jsondb_set_get(struct jsondb_set *set, char *path) {
 struct jsondb_set jsondb_set_select_eq(struct jsondb_set * set, char * path, struct jsondb_set * choices) {
     /* todo: duplicate code fragment */
     jsondb_ref * set_ref, * new_ref, * choice_ref;
-    jsondb_valp root, set_valp, choice_valp;
+    cjson_ptr root, set_valp, choice_valp;
     struct jsondb_set result = {0};
 
     /* now check each of the references... */
     JSONDB_SET_FOREACH(set, set_ref) {
-        root = JSONDB_VALP(set_ref->val);
-        if((set_valp = jsondb_valp_get(root, path)) == NULL) {
+        root = JSONDB_CJSON_VAL(set_ref->val);
+        if((set_valp = cjson_get(root, path)) == NULL) {
             /* has no attribute of the sort of _path_ */
             continue;
         }
 
         /* now try each of the choices */
         JSONDB_SET_FOREACH(choices, choice_ref) {
-            choice_valp = JSONDB_VALP(choice_ref->val);
-            if (jsondb_valp_cmp(set_valp, choice_valp) == 0) {
+            choice_valp = JSONDB_CJSON_VAL(choice_ref->val);
+            if (cjson_cmp(set_valp, choice_valp) == 0) {
                 /* the value at the path and the cmp was equal, great */
                 /* new reference */
                 new_ref = alloc_ref();
@@ -762,7 +447,7 @@ struct jsondb_set jsondb_set_union(struct jsondb_set *a, struct jsondb_set *b) {
         }
 
         /* compare em */
-        cmp = jsondb_valp_cmp(JSONDB_VALP(ahead->val), JSONDB_VALP(bhead->val));
+        cmp = cjson_cmp(JSONDB_CJSON_VAL(ahead->val), JSONDB_CJSON_VAL(bhead->val));
 
         /* todo to be optimized... */
         if(cmp > 0) {
@@ -789,7 +474,7 @@ finish:
 }
 
 struct jsondb_set jsondb_set_inter(struct jsondb_set *a, struct jsondb_set *b) {
-jsondb_ref * ahead, * bhead;
+    jsondb_ref * ahead, * bhead;
     struct jsondb_set result = {0};
     int cmp;
     
@@ -803,7 +488,7 @@ jsondb_ref * ahead, * bhead;
     /* mostly copied and adapted from jsondb_set_union */
     while(ahead && bhead) {
         /* compare em */
-        cmp = jsondb_valp_cmp(JSONDB_VALP(ahead->val), JSONDB_VALP(bhead->val));
+        cmp = cjson_cmp(JSONDB_CJSON_VAL(ahead->val), JSONDB_CJSON_VAL(bhead->val));
 
         /* todo to be optimized... */
         if(cmp > 0) {
@@ -826,7 +511,7 @@ finish:
 }
 
 struct jsondb_set jsondb_set_diff(struct jsondb_set *a, struct jsondb_set *b) {
-jsondb_ref * ahead, * bhead;
+    jsondb_ref * ahead, * bhead;
     struct jsondb_set result = {0};
     int cmp;
     
@@ -846,7 +531,7 @@ jsondb_ref * ahead, * bhead;
         }
 
         /* compare em */
-        cmp = jsondb_valp_cmp(JSONDB_VALP(ahead->val), JSONDB_VALP(bhead->val));
+        cmp = cjson_cmp(JSONDB_CJSON_VAL(ahead->val), JSONDB_CJSON_VAL(bhead->val));
 
         /* todo to be optimized... */
         if(cmp > 0) {
