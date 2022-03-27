@@ -163,13 +163,10 @@ static jsondb_ref * jsondb_ref_dup(jsondb_ref * ref) {
 
 #pragma region value creation
 
-static struct jsondb_val * jsondb_val_create(char * json) {
+static struct jsondb_val * jsondb_val_create(cjson_ptr p) {
     struct jsondb_val * val;
     size_t size;
-    cjson_ptr p;
 
-    /* load stuff */
-    p = cjson_load(json);
     size = cjson_measure(p) - p;
 
     /* allocate value */
@@ -209,7 +206,23 @@ static void jsondb_set_append(struct jsondb_set * set, jsondb_ref * ref) {
     set->size++;
 }
 
+struct jsondb_set jsondb_set_single(char *json) {
+    struct jsondb_set set;
+    jsondb_set_add(&set, json);
+    return set;
+}
+
 void jsondb_set_add(struct jsondb_set * set, char * json) {
+    jsondb_set_add_cjson(set, cjson_load(json));
+}
+
+void jsondb_set_add_set(struct jsondb_set *set, struct jsondb_set *add) {
+    struct jsondb_set new_refs;
+    new_refs = jsondb_set_dup(add);
+    jsondb_set_join(set, &new_refs);
+}
+
+void jsondb_set_add_cjson(struct jsondb_set *set, cjson_ptr json) {
     jsondb_ref *ref;
     struct jsondb_val *val;
     /* create the value */
@@ -219,18 +232,6 @@ void jsondb_set_add(struct jsondb_set * set, char * json) {
     jsondb_ref_set(ref, val);
     /* and put in main db set */
     jsondb_set_prepend(set, ref);
-}
-
-void jsondb_set_add_set(struct jsondb_set *set, struct jsondb_set *add) {
-    struct jsondb_set new_refs;
-    new_refs = jsondb_set_dup(add);
-    jsondb_set_join(set, &new_refs);
-}
-
-struct jsondb_set jsondb_set_single(char *json) {
-    struct jsondb_set set;
-    jsondb_set_add(&set, json);
-    return set;
 }
 
 struct jsondb_set jsondb_set_dup(struct jsondb_set *set) {
@@ -562,6 +563,10 @@ finish:
 
 void jsondb_add(char * json) {
     jsondb_set_add(&db_refs, json);
+}
+
+void jsondb_add_cjson(cjson_ptr json) {
+    jsondb_set_add_cjson(&db_refs, json);
 }
 
 void jsondb_add_set(struct jsondb_set * add) {

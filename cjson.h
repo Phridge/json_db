@@ -29,6 +29,9 @@ size_t          cjson_count         (cjson_ptr ptr);
 int             cjson_as_int        (cjson_ptr ptr);
 float           cjson_as_float      (cjson_ptr ptr);
 void *          cjson_data          (cjson_ptr ptr);
+enum cjson_type cjson_get_type      (cjson_ptr ptr);
+
+int             cjson_str_cmp       (cjson_ptr ptr, char * str);
 
 cjson_ptr       cjson_array_get     (cjson_ptr arr, size_t index);
 

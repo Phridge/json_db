@@ -443,6 +443,19 @@ void * cjson_data(cjson_ptr ptr) {
     }
 }
 
+enum cjson_type cjson_get_type(cjson_ptr ptr) {
+    return *ptr;
+}
+
+int cjson_str_cmp(cjson_ptr a, char * b) {
+    size_t a_size = cjson_count(a), b_size = strlen(b);
+    size_t size = a_size > b_size? b_size : a_size;
+    int cmp = memcmp(cjson_data(a), b, size);
+
+    if(cmp) return cmp;
+    else return (int)a_size - (int)b_size;
+}
+
 cjson_ptr cjson_array_get(cjson_ptr arr, size_t index) {
     cjson_size * offs;
     assert(*arr == CJSON_ARRAY);
@@ -456,7 +469,6 @@ static cjson_ptr cjson_obj_entry(cjson_ptr obj, char * key) {
     cjson_ptr entry;
     cjson_size size;
     int i;
-    size_t key_len = strlen(key);
 
     size = *(cjson_size*)(obj+1);
     off_ptr = (cjson_size*)(obj+1+sizeof(cjson_size));
@@ -464,7 +476,7 @@ static cjson_ptr cjson_obj_entry(cjson_ptr obj, char * key) {
     for (i = 0; i < size; i++) {
         entry = (cjson_ptr)off_ptr + off_ptr[i];
         /* todo: has the potential for Errors */
-        if(key_len == cjson_count(entry) && memcmp(key, cjson_data(entry), key_len) == 0) {
+        if(cjson_str_cmp(entry, key) == 0) {
             return cjson_measure(entry); /* skips the string and lands on the value */
         }
     }
